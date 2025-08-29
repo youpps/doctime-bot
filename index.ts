@@ -1,6 +1,9 @@
 import { Telegraf, Markup, Context } from "telegraf";
-import * as fs from "fs";
-import * as path from "path";
+import { config } from "dotenv";
+import fs from "fs";
+import path from "path";
+
+config();
 
 interface UserState {
   currentDiagnosis?: string;
