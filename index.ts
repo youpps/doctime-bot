@@ -6,7 +6,7 @@ import path from "path";
 config();
 
 interface UserState {
-  currentDiagnosis?: string;
+  diagnosis?: string;
   sections?: string[];
   messageIds?: number[];
 }
@@ -294,9 +294,9 @@ class MedicalBot {
 
       const diagnosis = ((ctx as any).match as RegExpMatchArray)[1];
 
-      this.sessionManager.updateUserState(userId, { currentDiagnosis: diagnosis });
+      this.sessionManager.updateUserState(userId, { diagnosis: diagnosis });
       if (ctx.userState) {
-        ctx.userState.currentDiagnosis = diagnosis;
+        ctx.userState.diagnosis = diagnosis;
       }
 
       const loadingMessage = await ctx.reply(`Выбран диагноз: ${diagnosis}\n\nЗагружаю информацию...`);
@@ -317,6 +317,7 @@ class MedicalBot {
       this.sessionManager.updateUserState(userId, { sections });
       if (ctx.userState) {
         ctx.userState.sections = sections;
+        ctx.userState.diagnosis = diagnosis;
       }
 
       const buttons = sections.map((section) => [Markup.button.callback(section, `select_section:${section}`)]);
@@ -357,6 +358,16 @@ class MedicalBot {
         return;
       }
 
+      const diagnosis = userState.diagnosis;
+      if (!diagnosis) {
+        const errorMessage = await ctx.reply(
+          "Информация не найдена. Пожалуйста, начните сначала.",
+          Markup.inlineKeyboard([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")])
+        );
+        this.saveMessageId(ctx, errorMessage.message_id);
+        return;
+      }
+
       const section = userState.sections.find((s) => s === sectionTitle);
 
       if (!section) {
@@ -368,7 +379,7 @@ class MedicalBot {
         return;
       }
 
-      const content = await this.getSection(section);
+      const content = await this.getSection(diagnosis, section);
 
       const sectionMessage = await ctx.reply(
         `**${section}**\n\n${content}`,
@@ -390,11 +401,9 @@ class MedicalBot {
 
   private async getSimilarDiagnoses(diagnosis: string): Promise<string[]> {
     try {
-      //   const response = await this.httpClient.get<SimilarDiagnosesResponse>("/diagnoses/similar", { diagnosis });
+      const response = await this.httpClient.get<any>("/diagnoses/similar", { diagnosis });
 
-      return ["Диагноз 1", "Диагноз 2"];
-
-      //   return response.diagnoses;
+      return response.diagnoses;
     } catch (error) {
       console.error("API Error - getSimilarDiagnoses:", error);
       throw new Error("Failed to get similar diagnoses");
@@ -403,24 +412,20 @@ class MedicalBot {
 
   private async getSections(diagnosis: string): Promise<string[]> {
     try {
-      //   const response = await this.httpClient.get<DiagnosisSectionsResponse>("/sections", { diagnosis });
+      const response = await this.httpClient.get<any>(`/diagnoses/${diagnosis}/sections`, {});
 
-      // Mock
-      return ["Название секции 1", "Название секции 2", "Название секции 3"];
-      //   return response.sections;
+      return response.sections;
     } catch (error) {
       console.error("API Error - getDiagnosisSections:", error);
       throw new Error("Failed to get diagnosis sections");
     }
   }
 
-  private async getSection(sectionName: string) {
+  private async getSection(diagnosis: string, section: string) {
     try {
-      //   const response = await this.httpClient.get<DiagnosisSectionsResponse>(`/sections/${sectionName}`, { diagnosis });
+      const response = await this.httpClient.get<any>(`/diagnoses/${diagnosis}/sections/${section}`, {});
 
-      // Mock
-      return "test";
-      //   return response.sections;
+      return response.sections;
     } catch (error) {
       console.error("API Error - getDiagnosisSections:", error);
       throw new Error("Failed to get diagnosis sections");
