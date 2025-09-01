@@ -375,7 +375,7 @@ class MedicalBot {
         ctx.userState.diagnosis = diagnosis;
       }
 
-      const loadingMessage = await ctx.replyWithMarkdown(`Выбран диагноз: ${diagnosis}\n\nЗагружаю информацию\.\.\.`);
+      const loadingMessage = await ctx.replyWithMarkdown(`*${diagnosis}*\n\nЗагружаю информацию\.\.\.`);
       this.saveMessageId(ctx, loadingMessage.message_id);
 
       const sections = await this.getSections(diagnosis);
