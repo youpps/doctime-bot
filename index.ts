@@ -10,7 +10,6 @@ interface UserState {
   diagnosis?: string;
   sections?: string[];
   messageIds?: number[];
-  // Хранилище для маппинга хэшей к реальным значениям
   callbackMap?: {
     [key: string]: string;
   };
@@ -39,7 +38,6 @@ class SessionManager {
         const data = fs.readFileSync(this.sessionFile, "utf8");
         const parsedData = JSON.parse(data);
 
-        // Восстанавливаем Map из сериализованного формата
         this.sessionData = Object.fromEntries(
           Object.entries(parsedData).map(([userId, state]: [string, any]) => {
             if (state.callbackMap && Array.isArray(state.callbackMap)) {
@@ -58,7 +56,6 @@ class SessionManager {
 
   private saveSessions(): void {
     try {
-      // Конвертируем Map в массив для сериализации
       const serializableData = Object.fromEntries(
         Object.entries(this.sessionData).map(([userId, state]) => {
           const serializableState = { ...state };
@@ -209,7 +206,7 @@ class MedicalBot {
 
     this.bot.on("message", async (ctx) => {
       await this.clearPreviousMessages(ctx);
-      await ctx.reply("Пожалуйста, используйте текстовые сообщения для ввода диагноза или команды меню.");
+      await ctx.replyWithMarkdown("Пожалуйста, используйте текстовые сообщения для ввода диагноза или команды меню.");
     });
   }
 
@@ -262,14 +259,12 @@ class MedicalBot {
         }
       }
 
-      // Очищаем callback mapping при очистке сообщений
       this.sessionManager.updateUserState(userId, {
         messageIds: [],
         callbackMap: {},
       });
       if (ctx.userState) {
         ctx.userState.messageIds = [];
-        // ctx.userState.callbackMap = {};
       }
     } catch (error) {
       console.error("Ошибка при удалении сообщений:", error);
@@ -283,7 +278,6 @@ class MedicalBot {
     const messageIds = ctx.userState.messageIds || [];
     messageIds.push(messageId);
 
-    // Обновляем состояние в файле
     this.sessionManager.updateUserState(userId, { messageIds });
     ctx.userState.messageIds = messageIds;
   }
@@ -292,13 +286,13 @@ class MedicalBot {
     const userId = ctx.from?.id;
     if (!userId) return;
 
-    const welcomeText = `👋 Здравствуйте, доктор!
-Я — DocTime.MedX, ваша медицинская база знаний.
-Задайте вопрос — и я помогу найти актуальные клинические рекомендации, проверить протокол или подсказать по диагностике и лечению.
+    const welcomeText = `👋 *Здравствуйте, доктор\!*
+Я — DocTime\.MedX, ваша медицинская база знаний\.
+Задайте вопрос — и я помогу найти актуальные клинические рекомендации, проверить протокол или подсказать по диагностике и лечению\.
 
-🩺 Давайте начнём: какой запрос хотите разобрать?`;
+🩺 *Давайте начнём:* какой запрос хотите разобрать?`;
 
-    const message = await ctx.reply(
+    const message = await ctx.replyWithMarkdown(
       welcomeText,
       Markup.inlineKeyboard([Markup.button.callback("Ввести диагноз", "new_diagnosis")])
     );
@@ -310,7 +304,7 @@ class MedicalBot {
     const userId = ctx.from?.id;
     if (!userId) return;
 
-    const message = await ctx.reply("Введите название диагноза, который вас интересует:");
+    const message = await ctx.replyWithMarkdown("*Введите название диагноза, который вас интересует:*");
     this.saveMessageId(ctx, message.message_id);
   }
 
@@ -319,39 +313,42 @@ class MedicalBot {
     if (!userId) return;
 
     try {
-      const searchingMessage = await ctx.reply("Ищу похожие диагнозы...");
+      const searchingMessage = await ctx.replyWithMarkdown("_Ищу похожие диагнозы..._");
       this.saveMessageId(ctx, searchingMessage.message_id);
 
       const similarDiagnoses = await this.getSimilarDiagnoses(userInput);
 
       if (similarDiagnoses.length === 0) {
-        const notFoundMessage = await ctx.reply(
-          "По вашему запросу ничего не найдено. Попробуйте ввести другой диагноз или уточнить формулировку.",
+        const notFoundMessage = await ctx.replyWithMarkdown(
+          "По вашему запросу ничего не найдено\\. Попробуйте ввести другой диагноз или уточнить формулировку\\.",
           Markup.inlineKeyboard([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")])
         );
         this.saveMessageId(ctx, notFoundMessage.message_id);
         return;
       }
 
-      // Создаем кнопки с хэшированными callback_data
       const buttons = await Promise.all(
         similarDiagnoses.map(async (diagnosis) => {
           const hash = await this.storeCallbackMapping(ctx, diagnosis, "diagnosis");
-          return [Markup.button.callback(diagnosis, `select_diagnosis:${hash}`)];
+          return Markup.button.callback(diagnosis, `select_diagnosis:${hash}`);
         })
       );
 
-      buttons.push([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")]);
+      const keyboard = [];
+      for (let i = 0; i < buttons.length; i += 2) {
+        keyboard.push(buttons.slice(i, i + 2));
+      }
+      keyboard.push([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")]);
 
-      const diagnosisMessage = await ctx.reply(
-        "Найдены следующие диагнозы. Выберите подходящий:",
-        Markup.inlineKeyboard(buttons)
+      const diagnosisMessage = await ctx.replyWithMarkdown(
+        "*Найдены следующие диагнозы\\. Выберите подходящий:*",
+        Markup.inlineKeyboard(keyboard)
       );
       this.saveMessageId(ctx, diagnosisMessage.message_id);
     } catch (error) {
       console.error("Error getting similar diagnoses:", error);
-      const errorMessage = await ctx.reply(
-        "Произошла ошибка при поиске диагнозов. Попробуйте позже.",
+      const errorMessage = await ctx.replyWithMarkdown(
+        "Произошла ошибка при поиске диагнозов\\. Попробуйте позже\\.",
         Markup.inlineKeyboard([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")])
       );
       this.saveMessageId(ctx, errorMessage.message_id);
@@ -366,12 +363,11 @@ class MedicalBot {
       await ctx.answerCbQuery();
 
       const hash = ((ctx as any).match as RegExpMatchArray)[1];
-
       const diagnosis = await this.resolveCallbackMapping(ctx, `diagnosis:${hash}`);
 
       if (!diagnosis) {
-        const errorMessage = await ctx.reply(
-          "Ошибка: диагноз не найден. Пожалуйста, попробуйте снова.",
+        const errorMessage = await ctx.replyWithMarkdown(
+          "Ошибка: диагноз не найден\\. Пожалуйста, попробуйте снова\\.",
           Markup.inlineKeyboard([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")])
         );
         this.saveMessageId(ctx, errorMessage.message_id);
@@ -383,44 +379,48 @@ class MedicalBot {
         ctx.userState.diagnosis = diagnosis;
       }
 
-      const loadingMessage = await ctx.reply(`Выбран диагноз: ${diagnosis}\n\nЗагружаю информацию...`);
+      const loadingMessage = await ctx.replyWithMarkdown(
+        `*Выбран диагноз:* ${diagnosis}\n\n_Загружаю информацию\.\.\._`
+      );
       this.saveMessageId(ctx, loadingMessage.message_id);
 
       const sections = await this.getSections(diagnosis);
 
       if (sections.length === 0) {
-        const noInfoMessage = await ctx.reply(
-          "Для выбранного диагноза нет доступной информации.",
+        const noInfoMessage = await ctx.replyWithMarkdown(
+          "Для выбранного диагноза нет доступной информации\\.",
           Markup.inlineKeyboard([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")])
         );
         this.saveMessageId(ctx, noInfoMessage.message_id);
         return;
       }
 
-      // Сохраняем секции в сессии
       this.sessionManager.updateUserState(userId, { sections });
       if (ctx.userState) {
         ctx.userState.sections = sections;
         ctx.userState.diagnosis = diagnosis;
       }
 
-      // Создаем кнопки с хэшированными callback_data для секций
-      const buttons = await Promise.all(
+      const sectionButtons = await Promise.all(
         sections.map(async (section) => {
           const hash = await this.storeCallbackMapping(ctx, section, "section");
-          return [Markup.button.callback(section, `select_section:${hash}`)];
+          return Markup.button.callback(section, `select_section:${hash}`);
         })
       );
 
-      buttons.push([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")]);
+      const keyboard = [];
+      for (let i = 0; i < sectionButtons.length; i += 2) {
+        keyboard.push(sectionButtons.slice(i, i + 2));
+      }
+      keyboard.push([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")]);
 
-      const sectionsMessage = await ctx.reply("Доступные разделы:", Markup.inlineKeyboard(buttons));
+      const sectionsMessage = await ctx.replyWithMarkdown("*Доступные разделы:*", Markup.inlineKeyboard(keyboard));
       this.saveMessageId(ctx, sectionsMessage.message_id);
     } catch (error) {
       console.error("Error getting diagnosis sections:", error);
 
-      const errorMessage = await ctx.reply(
-        "Произошла ошибка при загрузке информации. Попробуйте позже.",
+      const errorMessage = await ctx.replyWithMarkdown(
+        "Произошла ошибка при загрузке информации\\. Попробуйте позже\\.",
         Markup.inlineKeyboard([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")])
       );
 
@@ -439,19 +439,18 @@ class MedicalBot {
       const sectionTitle = await this.resolveCallbackMapping(ctx, `section:${hash}`);
 
       if (!sectionTitle) {
-        const errorMessage = await ctx.reply(
-          "Ошибка: раздел не найден. Пожалуйста, попробуйте снова.",
+        const errorMessage = await ctx.replyWithMarkdown(
+          "Ошибка: раздел не найден\\. Пожалуйста, попробуйте снова\\.",
           Markup.inlineKeyboard([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")])
         );
         this.saveMessageId(ctx, errorMessage.message_id);
         return;
       }
 
-      // Загружаем актуальное состояние из файла
       const userState = this.sessionManager.getUserState(userId);
       if (!userState || !userState.sections) {
-        const errorMessage = await ctx.reply(
-          "Информация не найдена. Пожалуйста, начните сначала.",
+        const errorMessage = await ctx.replyWithMarkdown(
+          "Информация не найдена\\. Пожалуйста, начните сначала\\.",
           Markup.inlineKeyboard([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")])
         );
         this.saveMessageId(ctx, errorMessage.message_id);
@@ -460,8 +459,8 @@ class MedicalBot {
 
       const diagnosis = userState.diagnosis;
       if (!diagnosis) {
-        const errorMessage = await ctx.reply(
-          "Информация не найдена. Пожалуйста, начните сначала.",
+        const errorMessage = await ctx.replyWithMarkdown(
+          "Информация не найдена\\. Пожалуйста, начните сначала\\.",
           Markup.inlineKeyboard([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")])
         );
         this.saveMessageId(ctx, errorMessage.message_id);
@@ -471,18 +470,23 @@ class MedicalBot {
       const section = userState.sections.find((s) => s === sectionTitle);
 
       if (!section) {
-        const notFoundMessage = await ctx.reply(
-          "Раздел не найден.",
+        const notFoundMessage = await ctx.replyWithMarkdown(
+          "Раздел не найден\\.",
           Markup.inlineKeyboard([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")])
         );
         this.saveMessageId(ctx, notFoundMessage.message_id);
         return;
       }
 
+      const loadingMessage = await ctx.replyWithMarkdown(`*${section}*\n\n_Загружаю содержимое\.\.\._`);
+      this.saveMessageId(ctx, loadingMessage.message_id);
+
       const content = await this.getSection(diagnosis, section);
 
-      const sectionMessage = await ctx.reply(
-        `${section}\n\n${content}`,
+      const formattedContent = this.formatContentForMarkdown(content);
+
+      const sectionMessage = await ctx.replyWithMarkdown(
+        `*${section}*\n\n${formattedContent}`,
         Markup.inlineKeyboard([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")])
       );
 
@@ -490,8 +494,8 @@ class MedicalBot {
     } catch (error) {
       console.error("Error handling section selection:", error);
 
-      const errorMessage = await ctx.reply(
-        "Произошла ошибка при загрузке раздела. Попробуйте позже.",
+      const errorMessage = await ctx.replyWithMarkdown(
+        "Произошла ошибка при загрузке раздела\\. Попробуйте позже\\.",
         Markup.inlineKeyboard([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")])
       );
 
@@ -499,10 +503,32 @@ class MedicalBot {
     }
   }
 
+  private formatContentForMarkdown(content: string): string {
+    // Экранируем специальные символы Markdown
+    return content
+      .replace(/\*/g, "\\*")
+      .replace(/_/g, "\\_")
+      .replace(/\[/g, "\\[")
+      .replace(/\]/g, "\\]")
+      .replace(/\(/g, "\\(")
+      .replace(/\)/g, "\\)")
+      .replace(/~/g, "\\~")
+      .replace(/`/g, "\\`")
+      .replace(/>/g, "\\>")
+      .replace(/#/g, "\\#")
+      .replace(/\+/g, "\\+")
+      .replace(/-/g, "\\-")
+      .replace(/=/g, "\\=")
+      .replace(/\|/g, "\\|")
+      .replace(/\{/g, "\\{")
+      .replace(/\}/g, "\\}")
+      .replace(/\./g, "\\.")
+      .replace(/!/g, "\\!");
+  }
+
   private async getSimilarDiagnoses(diagnosis: string): Promise<string[]> {
     try {
       const response = await this.httpClient.get<any>("/diagnoses/similar", { diagnosis });
-
       return response.diagnoses;
     } catch (error) {
       console.error("API Error - getSimilarDiagnoses:", error);
@@ -513,7 +539,6 @@ class MedicalBot {
   private async getSections(diagnosis: string): Promise<string[]> {
     try {
       const response = await this.httpClient.get<any>(`/diagnoses/${diagnosis}/sections`, {});
-
       return response.sections;
     } catch (error) {
       console.error("API Error - getDiagnosisSections:", error);
@@ -521,14 +546,13 @@ class MedicalBot {
     }
   }
 
-  private async getSection(diagnosis: string, section: string) {
+  private async getSection(diagnosis: string, section: string): Promise<string> {
     try {
       const response = await this.httpClient.get<any>(`/diagnoses/${diagnosis}/sections/${section}`, {});
-
       return response.content;
     } catch (error) {
-      console.error("API Error - getDiagnosisSections:", error);
-      throw new Error("Failed to get diagnosis sections");
+      console.error("API Error - getSectionContent:", error);
+      throw new Error("Failed to get section content");
     }
   }
 
@@ -537,7 +561,6 @@ class MedicalBot {
       console.log("Бот запущен");
     });
 
-    // Graceful shutdown
     process.once("SIGINT", () => {
       console.log("Сохранение сессий перед завершением...");
       this.bot.stop("SIGINT");
