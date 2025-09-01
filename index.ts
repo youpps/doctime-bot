@@ -2,6 +2,7 @@ import { Telegraf, Markup, Context } from "telegraf";
 import { config } from "dotenv";
 import fs from "fs";
 import path from "path";
+import { createHash } from "crypto";
 
 config();
 
@@ -9,6 +10,10 @@ interface UserState {
   diagnosis?: string;
   sections?: string[];
   messageIds?: number[];
+  // Хранилище для маппинга хэшей к реальным значениям
+  callbackMap?: {
+    [key: string]: string;
+  };
 }
 
 interface BotContext extends Context {
@@ -32,7 +37,17 @@ class SessionManager {
     try {
       if (fs.existsSync(this.sessionFile)) {
         const data = fs.readFileSync(this.sessionFile, "utf8");
-        this.sessionData = JSON.parse(data);
+        const parsedData = JSON.parse(data);
+
+        // Восстанавливаем Map из сериализованного формата
+        this.sessionData = Object.fromEntries(
+          Object.entries(parsedData).map(([userId, state]: [string, any]) => {
+            if (state.callbackMap && Array.isArray(state.callbackMap)) {
+              state.callbackMap = new Map(state.callbackMap);
+            }
+            return [userId, state];
+          })
+        );
         console.log(`Сессии загружены из ${this.sessionFile}`);
       }
     } catch (error) {
@@ -43,7 +58,18 @@ class SessionManager {
 
   private saveSessions(): void {
     try {
-      fs.writeFileSync(this.sessionFile, JSON.stringify(this.sessionData, null, 2));
+      // Конвертируем Map в массив для сериализации
+      const serializableData = Object.fromEntries(
+        Object.entries(this.sessionData).map(([userId, state]) => {
+          const serializableState = { ...state };
+          if (state.callbackMap instanceof Map) {
+            serializableState.callbackMap = Array.from(state.callbackMap.entries());
+          }
+          return [userId, serializableState];
+        })
+      );
+
+      fs.writeFileSync(this.sessionFile, JSON.stringify(serializableData, null, 2));
     } catch (error) {
       console.error("Ошибка при сохранении сессий:", error);
     }
@@ -130,7 +156,10 @@ class MedicalBot {
       const userId = ctx.from?.id ?? 0;
 
       if (userId) {
-        const userState = this.sessionManager.getUserState(userId) || { messageIds: [] };
+        const userState = this.sessionManager.getUserState(userId) || {
+          messageIds: [],
+          callbackMap: {},
+        };
         ctx.userState = userState;
       }
 
@@ -184,6 +213,40 @@ class MedicalBot {
     });
   }
 
+  private generateHash(text: string): string {
+    return createHash("sha256").update(text).digest("hex").substring(0, 32);
+  }
+
+  private async storeCallbackMapping(
+    ctx: BotContext,
+    originalValue: string,
+    type: "diagnosis" | "section"
+  ): Promise<string> {
+    const userId = ctx.from?.id;
+    if (!userId || !ctx.userState) return "";
+
+    const hash = this.generateHash(originalValue);
+    const key = `${type}:${hash}`;
+
+    if (!ctx.userState.callbackMap) {
+      ctx.userState.callbackMap = {};
+    }
+
+    ctx.userState.callbackMap[key] = originalValue;
+
+    this.sessionManager.updateUserState(userId, { callbackMap: ctx.userState.callbackMap });
+
+    return hash;
+  }
+
+  private async resolveCallbackMapping(ctx: BotContext, callbackData: string): Promise<string | null> {
+    const userId = ctx.from?.id;
+
+    if (!userId || !ctx.userState || !ctx.userState.callbackMap) return null;
+
+    return ctx.userState.callbackMap[callbackData] || null;
+  }
+
   private async clearPreviousMessages(ctx: BotContext) {
     const userId = ctx.from?.id;
     if (!userId || !ctx.userState || !ctx.userState.messageIds || ctx.userState.messageIds.length === 0) {
@@ -199,9 +262,15 @@ class MedicalBot {
         }
       }
 
-      // Обновляем состояние пользователя
-      this.sessionManager.updateUserState(userId, { messageIds: [] });
-      ctx.userState.messageIds = [];
+      // Очищаем callback mapping при очистке сообщений
+      this.sessionManager.updateUserState(userId, {
+        messageIds: [],
+        callbackMap: {},
+      });
+      if (ctx.userState) {
+        ctx.userState.messageIds = [];
+        // ctx.userState.callbackMap = {};
+      }
     } catch (error) {
       console.error("Ошибка при удалении сообщений:", error);
     }
@@ -264,9 +333,13 @@ class MedicalBot {
         return;
       }
 
-      const buttons = similarDiagnoses.map((diagnosis) => [
-        Markup.button.callback(diagnosis, `select_diagnosis:${diagnosis}`),
-      ]);
+      // Создаем кнопки с хэшированными callback_data
+      const buttons = await Promise.all(
+        similarDiagnoses.map(async (diagnosis) => {
+          const hash = await this.storeCallbackMapping(ctx, diagnosis, "diagnosis");
+          return [Markup.button.callback(diagnosis, `select_diagnosis:${hash}`)];
+        })
+      );
 
       buttons.push([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")]);
 
@@ -292,9 +365,20 @@ class MedicalBot {
     try {
       await ctx.answerCbQuery();
 
-      const diagnosis = ((ctx as any).match as RegExpMatchArray)[1];
+      const hash = ((ctx as any).match as RegExpMatchArray)[1];
 
-      this.sessionManager.updateUserState(userId, { diagnosis: diagnosis });
+      const diagnosis = await this.resolveCallbackMapping(ctx, `diagnosis:${hash}`);
+
+      if (!diagnosis) {
+        const errorMessage = await ctx.reply(
+          "Ошибка: диагноз не найден. Пожалуйста, попробуйте снова.",
+          Markup.inlineKeyboard([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")])
+        );
+        this.saveMessageId(ctx, errorMessage.message_id);
+        return;
+      }
+
+      this.sessionManager.updateUserState(userId, { diagnosis });
       if (ctx.userState) {
         ctx.userState.diagnosis = diagnosis;
       }
@@ -320,7 +404,13 @@ class MedicalBot {
         ctx.userState.diagnosis = diagnosis;
       }
 
-      const buttons = sections.map((section) => [Markup.button.callback(section, `select_section:${section}`)]);
+      // Создаем кнопки с хэшированными callback_data для секций
+      const buttons = await Promise.all(
+        sections.map(async (section) => {
+          const hash = await this.storeCallbackMapping(ctx, section, "section");
+          return [Markup.button.callback(section, `select_section:${hash}`)];
+        })
+      );
 
       buttons.push([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")]);
 
@@ -345,7 +435,17 @@ class MedicalBot {
     try {
       await ctx.answerCbQuery();
 
-      const sectionTitle = ((ctx as any).match as RegExpMatchArray)[1];
+      const hash = ((ctx as any).match as RegExpMatchArray)[1];
+      const sectionTitle = await this.resolveCallbackMapping(ctx, `section:${hash}`);
+
+      if (!sectionTitle) {
+        const errorMessage = await ctx.reply(
+          "Ошибка: раздел не найден. Пожалуйста, попробуйте снова.",
+          Markup.inlineKeyboard([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")])
+        );
+        this.saveMessageId(ctx, errorMessage.message_id);
+        return;
+      }
 
       // Загружаем актуальное состояние из файла
       const userState = this.sessionManager.getUserState(userId);
@@ -382,7 +482,7 @@ class MedicalBot {
       const content = await this.getSection(diagnosis, section);
 
       const sectionMessage = await ctx.reply(
-        `**${section}**\n\n${content}`,
+        `${section}\n\n${content}`,
         Markup.inlineKeyboard([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")])
       );
 
@@ -425,7 +525,7 @@ class MedicalBot {
     try {
       const response = await this.httpClient.get<any>(`/diagnoses/${diagnosis}/sections/${section}`, {});
 
-      return response.sections;
+      return response.content;
     } catch (error) {
       console.error("API Error - getDiagnosisSections:", error);
       throw new Error("Failed to get diagnosis sections");
