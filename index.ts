@@ -286,11 +286,11 @@ class MedicalBot {
     const userId = ctx.from?.id;
     if (!userId) return;
 
-    const welcomeText = `👋 *Здравствуйте, доктор\!*
+    const welcomeText = `👋 Здравствуйте, доктор\!
 Я — DocTime\.MedX, ваша медицинская база знаний\.
 Задайте вопрос — и я помогу найти актуальные клинические рекомендации, проверить протокол или подсказать по диагностике и лечению\.
 
-🩺 *Давайте начнём:* какой запрос хотите разобрать?`;
+🩺 Давайте начнём: какой запрос хотите разобрать?`;
 
     const message = await ctx.replyWithMarkdown(
       welcomeText,
@@ -304,7 +304,7 @@ class MedicalBot {
     const userId = ctx.from?.id;
     if (!userId) return;
 
-    const message = await ctx.replyWithMarkdown("*Введите название диагноза, который вас интересует:*");
+    const message = await ctx.replyWithMarkdown("Введите название диагноза, который вас интересует:");
     this.saveMessageId(ctx, message.message_id);
   }
 
@@ -313,7 +313,7 @@ class MedicalBot {
     if (!userId) return;
 
     try {
-      const searchingMessage = await ctx.replyWithMarkdown("_Ищу похожие диагнозы..._");
+      const searchingMessage = await ctx.replyWithMarkdown("Ищу похожие диагнозы...");
       this.saveMessageId(ctx, searchingMessage.message_id);
 
       const similarDiagnoses = await this.getSimilarDiagnoses(userInput);
@@ -330,18 +330,14 @@ class MedicalBot {
       const buttons = await Promise.all(
         similarDiagnoses.map(async (diagnosis) => {
           const hash = await this.storeCallbackMapping(ctx, diagnosis, "diagnosis");
-          return Markup.button.callback(diagnosis, `select_diagnosis:${hash}`);
+          return [Markup.button.callback(diagnosis, `select_diagnosis:${hash}`)];
         })
       );
 
-      const keyboard = [];
-      for (let i = 0; i < buttons.length; i += 2) {
-        keyboard.push(buttons.slice(i, i + 2));
-      }
-      keyboard.push([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")]);
+      const keyboard = [...buttons, [Markup.button.callback("Ввести новый диагноз", "new_diagnosis")]];
 
       const diagnosisMessage = await ctx.replyWithMarkdown(
-        "*Найдены следующие диагнозы\\. Выберите подходящий:*",
+        "Найдены следующие диагнозы\\. Выберите подходящий:",
         Markup.inlineKeyboard(keyboard)
       );
       this.saveMessageId(ctx, diagnosisMessage.message_id);
@@ -379,9 +375,7 @@ class MedicalBot {
         ctx.userState.diagnosis = diagnosis;
       }
 
-      const loadingMessage = await ctx.replyWithMarkdown(
-        `*Выбран диагноз:* ${diagnosis}\n\n_Загружаю информацию\.\.\._`
-      );
+      const loadingMessage = await ctx.replyWithMarkdown(`Выбран диагноз: ${diagnosis}\n\n_Загружаю информацию\.\.\._`);
       this.saveMessageId(ctx, loadingMessage.message_id);
 
       const sections = await this.getSections(diagnosis);
@@ -412,9 +406,10 @@ class MedicalBot {
       for (let i = 0; i < sectionButtons.length; i += 2) {
         keyboard.push(sectionButtons.slice(i, i + 2));
       }
+
       keyboard.push([Markup.button.callback("Ввести новый диагноз", "new_diagnosis")]);
 
-      const sectionsMessage = await ctx.replyWithMarkdown("*Доступные разделы:*", Markup.inlineKeyboard(keyboard));
+      const sectionsMessage = await ctx.replyWithMarkdown("Доступные разделы:", Markup.inlineKeyboard(keyboard));
       this.saveMessageId(ctx, sectionsMessage.message_id);
     } catch (error) {
       console.error("Error getting diagnosis sections:", error);
