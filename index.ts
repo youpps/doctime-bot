@@ -337,7 +337,7 @@ class MedicalBot {
       const keyboard = [...buttons, [Markup.button.callback("Ввести новый диагноз", "new_diagnosis")]];
 
       const diagnosisMessage = await ctx.replyWithMarkdown(
-        "Найдены следующие диагнозы\\. Выберите подходящий:",
+        "Найдены следующие диагнозы. Выберите подходящий:",
         Markup.inlineKeyboard(keyboard)
       );
       this.saveMessageId(ctx, diagnosisMessage.message_id);
@@ -375,7 +375,7 @@ class MedicalBot {
         ctx.userState.diagnosis = diagnosis;
       }
 
-      const loadingMessage = await ctx.replyWithMarkdown(`Выбран диагноз: ${diagnosis}\n\n_Загружаю информацию\.\.\._`);
+      const loadingMessage = await ctx.replyWithMarkdown(`Выбран диагноз: ${diagnosis}\n\nЗагружаю информацию\.\.\.`);
       this.saveMessageId(ctx, loadingMessage.message_id);
 
       const sections = await this.getSections(diagnosis);
@@ -473,7 +473,7 @@ class MedicalBot {
         return;
       }
 
-      const loadingMessage = await ctx.replyWithMarkdown(`*${section}*\n\n_Загружаю содержимое\.\.\._`);
+      const loadingMessage = await ctx.replyWithMarkdown(`*${section}*\n\nЗагружаю содержимое\.\.\.`);
       this.saveMessageId(ctx, loadingMessage.message_id);
 
       const content = await this.getSection(diagnosis, section);
@@ -500,25 +500,25 @@ class MedicalBot {
 
   private formatContentForMarkdown(content: string): string {
     // Экранируем специальные символы Markdown
-    return content
-      .replace(/\*/g, "\\*")
-      .replace(/_/g, "\\_")
-      .replace(/\[/g, "\\[")
-      .replace(/\]/g, "\\]")
-      .replace(/\(/g, "\\(")
-      .replace(/\)/g, "\\)")
-      .replace(/~/g, "\\~")
-      .replace(/`/g, "\\`")
-      .replace(/>/g, "\\>")
-      .replace(/#/g, "\\#")
-      .replace(/\+/g, "\\+")
-      .replace(/-/g, "\\-")
-      .replace(/=/g, "\\=")
-      .replace(/\|/g, "\\|")
-      .replace(/\{/g, "\\{")
-      .replace(/\}/g, "\\}")
-      .replace(/\./g, "\\.")
-      .replace(/!/g, "\\!");
+    return content;
+    //   .replace(/\*/g, "\\*")
+    //   .replace(/_/g, "\\_")
+    //   .replace(/\[/g, "\\[")
+    //   .replace(/\]/g, "\\]")
+    //   .replace(/\(/g, "\\(")
+    //   .replace(/\)/g, "\\)")
+    //   .replace(/~/g, "\\~")
+    //   .replace(/`/g, "\\`")
+    //   .replace(/>/g, "\\>")
+    //   .replace(/#/g, "\\#")
+    //   .replace(/\+/g, "\\+")
+    //   .replace(/-/g, "\\-")
+    //   .replace(/=/g, "\\=")
+    //   .replace(/\|/g, "\\|")
+    //   .replace(/\{/g, "\\{")
+    //   .replace(/\}/g, "\\}")
+    //   .replace(/\./g, "\\.")
+    //   .replace(/!/g, "\\!");
   }
 
   private async getSimilarDiagnoses(diagnosis: string): Promise<string[]> {
