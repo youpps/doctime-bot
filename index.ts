@@ -607,4 +607,4 @@ if (!API_BASE_URL) {
 const medicalBot = new MedicalBot(BOT_TOKEN, API_BASE_URL);
 medicalBot.launch();
 
-console.log("TEST");
+console.log("LOVE KSU");
