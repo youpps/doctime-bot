@@ -87,7 +87,6 @@ class SessionManager {
     if (!this.sessionData[userId]) {
       this.sessionData[userId] = {};
     }
-
     this.sessionData[userId] = { ...this.sessionData[userId], ...update };
     this.saveSessions();
   }
@@ -131,7 +130,10 @@ class MedicalBot {
     });
 
     this.repositories = new Repositories(database, apiBaseURL);
+    this.setupBot();
+  }
 
+  private setupBot(): void {
     this.setupMiddlewares();
     this.setupHandlers();
   }
@@ -177,26 +179,32 @@ class MedicalBot {
   }
 
   private setupHandlers(): void {
+    // Команды
     this.bot.start((ctx) => this.handleStart(ctx));
-    this.bot.command("new_diagnosis", (ctx) => this.handleNewDiagnosisCommand(ctx));
+    this.bot.command("new_diagnosis", (ctx) => this.handleNewDiagnosis(ctx));
+
+    // Обработка текстовых сообщений
     this.bot.on("text", (ctx) => this.handleTextInput(ctx));
 
+    // Обработка callback-кнопок
     this.bot.action(/select_diagnosis:(.+)/, (ctx) => this.handleDiagnosisSelection(ctx));
     this.bot.action(/select_section:(.+)/, (ctx) => this.handleSectionSelection(ctx));
-    this.bot.action("new_diagnosis", (ctx) => this.handleNewDiagnosisAction(ctx));
+    this.bot.action("new_diagnosis", (ctx) => this.handleNewDiagnosis(ctx));
     this.bot.action("back_to_sections", (ctx) => this.handleBackToSections(ctx));
 
+    // Обработка прочих сообщений
     this.bot.on("message", (ctx) => this.handleOtherMessages(ctx));
   }
 
+  // Основные обработчики
   private async handleStart(ctx: BotContext): Promise<void> {
     await this.clearPreviousMessages(ctx);
     await this.sendWelcomeMessage(ctx);
   }
 
-  private async handleNewDiagnosisCommand(ctx: BotContext): Promise<void> {
+  private async handleNewDiagnosis(ctx: BotContext): Promise<void> {
     await this.clearPreviousMessages(ctx);
-    await this.askForNewDiagnosis(ctx);
+    await this.askForDiagnosis(ctx);
   }
 
   private async handleTextInput(ctx: BotContext): Promise<void> {
@@ -206,12 +214,11 @@ class MedicalBot {
     if (userInput.startsWith("/") || !userId) return;
 
     await this.clearPreviousMessages(ctx);
-    await this.handleDiagnosisInput(ctx, userInput);
+    await this.processDiagnosisInput(ctx, userInput);
   }
 
   private async handleDiagnosisSelection(ctx: BotContext): Promise<void> {
     await this.clearPreviousMessages(ctx);
-
     const hash = ((ctx as any).match as RegExpMatchArray)[1];
     const diagnosis = await this.resolveCallbackMapping(ctx, `diagnosis:${hash}`);
 
@@ -220,12 +227,11 @@ class MedicalBot {
       return;
     }
 
-    await this.processDiagnosisSelection(ctx, diagnosis);
+    await this.processSelectedDiagnosis(ctx, diagnosis);
   }
 
   private async handleSectionSelection(ctx: BotContext): Promise<void> {
     await this.clearPreviousMessages(ctx);
-
     const hash = ((ctx as any).match as RegExpMatchArray)[1];
     const sectionTitle = await this.resolveCallbackMapping(ctx, `section:${hash}`);
 
@@ -234,12 +240,7 @@ class MedicalBot {
       return;
     }
 
-    await this.processSectionSelection(ctx, sectionTitle);
-  }
-
-  private async handleNewDiagnosisAction(ctx: BotContext): Promise<void> {
-    await this.clearPreviousMessages(ctx);
-    await this.askForNewDiagnosis(ctx);
+    await this.processSelectedSection(ctx, sectionTitle);
   }
 
   private async handleBackToSections(ctx: BotContext): Promise<void> {
@@ -252,6 +253,7 @@ class MedicalBot {
     await ctx.replyWithMarkdown("Пожалуйста, используйте текстовые сообщения для ввода диагноза или команды меню.");
   }
 
+  // Вспомогательные методы
   private generateHash(text: string): string {
     return createHash("sha256").update(text).digest("hex").substring(0, 32);
   }
@@ -271,7 +273,6 @@ class MedicalBot {
     ctx.userState.callbackMap[key] = originalValue;
 
     this.sessionManager.updateUserState(userId, { callbackMap: ctx.userState.callbackMap });
-
     return hash;
   }
 
@@ -317,6 +318,7 @@ class MedicalBot {
     ctx.userState.messageIds = messageIds;
   }
 
+  // Методы взаимодействия с пользователем
   private async sendWelcomeMessage(ctx: BotContext): Promise<void> {
     const welcomeText = `👋 Здравствуйте, доктор!
 Я — DocTime.MedX, ваша медицинская база знаний.
@@ -332,12 +334,12 @@ class MedicalBot {
     this.saveMessageId(ctx, message.message_id);
   }
 
-  private async askForNewDiagnosis(ctx: BotContext): Promise<void> {
+  private async askForDiagnosis(ctx: BotContext): Promise<void> {
     const message = await ctx.replyWithMarkdown("Введите название диагноза, который вас интересует:");
     this.saveMessageId(ctx, message.message_id);
   }
 
-  private async handleDiagnosisInput(ctx: BotContext, userInput: string): Promise<void> {
+  private async processDiagnosisInput(ctx: BotContext, userInput: string): Promise<void> {
     const userId = ctx.from?.id;
     if (!userId) return;
 
@@ -346,6 +348,16 @@ class MedicalBot {
       this.saveMessageId(ctx, searchingMessage.message_id);
 
       const similarDiagnoses = await this.repositories.apiRepository.getSimilarDiagnoses(userInput);
+
+      // Логирование
+      this.repositories.clientLogsRepository
+        .create({
+          clientTelegramId: userId,
+          text: `Запрос на получение диагнозов от пользователя ${userId}.\n\nЗапрос: ${userInput}\n\nОтвет:\n${similarDiagnoses.join(
+            ", "
+          )}`,
+        })
+        .catch(console.log);
 
       if (similarDiagnoses.length === 0) {
         await this.showNoResultsFound(ctx);
@@ -368,12 +380,10 @@ class MedicalBot {
   }
 
   private async showDiagnosisOptions(ctx: BotContext, diagnoses: string[]): Promise<void> {
-    const correctDiagnoses = diagnoses.filter(
-      (diagnosis) => diagnosis.lastIndexOf(diagnosis) === diagnoses.indexOf(diagnosis)
-    );
+    const uniqueDiagnoses = diagnoses.filter((diagnosis, index) => diagnoses.indexOf(diagnosis) === index);
 
     const buttons = await Promise.all(
-      correctDiagnoses.map(async (diagnosis) => {
+      uniqueDiagnoses.map(async (diagnosis) => {
         const hash = await this.storeCallbackMapping(ctx, diagnosis, "diagnosis");
         return [Markup.button.callback(diagnosis, `select_diagnosis:${hash}`)];
       })
@@ -389,7 +399,7 @@ class MedicalBot {
     this.saveMessageId(ctx, message.message_id);
   }
 
-  private async processDiagnosisSelection(ctx: BotContext, diagnosis: string): Promise<void> {
+  private async processSelectedDiagnosis(ctx: BotContext, diagnosis: string): Promise<void> {
     const userId = ctx.from?.id;
     if (!userId) return;
 
@@ -414,6 +424,16 @@ class MedicalBot {
       }
 
       const sections = await this.repositories.apiRepository.getSections(userState.diagnosis);
+
+      // Логирование
+      this.repositories.clientLogsRepository
+        .create({
+          clientTelegramId: userId,
+          text: `Запрос на получение секций от пользователя ${userId}.\n\nЗапрос: ${
+            userState.diagnosis
+          }\n\nОтвет:\n${sections.join(", ")}`,
+        })
+        .catch(console.log);
 
       if (sections.length === 0) {
         await this.showNoSectionsAvailable(ctx);
@@ -441,17 +461,16 @@ class MedicalBot {
   }
 
   private async displaySectionsList(ctx: BotContext, diagnosis: string, sections: string[]): Promise<void> {
-    const correctSections = sections
+    const filteredSections = sections
       .filter((section) => section !== "МКБ")
       .sort((a, b) => {
         const priorityA = a === "Лечение" || a === "Диагностика" ? 0 : 1;
         const priorityB = b === "Лечение" || b === "Диагностика" ? 0 : 1;
-
         return priorityA - priorityB;
       });
 
     const sectionButtons = await Promise.all(
-      correctSections.map(async (section) => {
+      filteredSections.map(async (section) => {
         const hash = await this.storeCallbackMapping(ctx, section, "section");
         return Markup.button.callback(section, `select_section:${hash}`);
       })
@@ -472,7 +491,7 @@ class MedicalBot {
     this.saveMessageId(ctx, message.message_id);
   }
 
-  private async processSectionSelection(ctx: BotContext, sectionTitle: string): Promise<void> {
+  private async processSelectedSection(ctx: BotContext, sectionTitle: string): Promise<void> {
     const userId = ctx.from?.id;
     if (!userId) return;
 
@@ -490,10 +509,18 @@ class MedicalBot {
     try {
       const content = await this.repositories.apiRepository.getSection(userState.diagnosis, sectionTitle);
 
-      const correctContent = content.replace(/###\s/g, "").replace(/###/g, "");
+      // Логирование
+      this.repositories.clientLogsRepository
+        .create({
+          clientTelegramId: userId,
+          text: `Запрос на получение секции от пользователя ${userId}.\n\nЗапрос: ${sectionTitle}\n\nОтвет:\n${content}`,
+        })
+        .catch(console.log);
+
+      const cleanedContent = content.replace(/###\s/g, "").replace(/###/g, "");
 
       const message = await ctx.replyWithMarkdown(
-        `*${sectionTitle}*\n\n${correctContent}`,
+        `*${sectionTitle}*\n\n${cleanedContent}`,
         Markup.inlineKeyboard([
           [Markup.button.callback("Назад к разделам", "back_to_sections")],
           [Markup.button.callback("Ввести новый диагноз", "new_diagnosis")],
@@ -546,6 +573,7 @@ class MedicalBot {
   }
 }
 
+// Инициализация бота
 const BOT_TOKEN = process.env.BOT_TOKEN || "";
 const API_BASE_URL = process.env.API_BASE_URL || "http://localhost";
 
@@ -566,5 +594,4 @@ if (!API_BASE_URL) {
 }
 
 const medicalBot = new MedicalBot(BOT_TOKEN, API_BASE_URL, DB_HOST, DB_PORT, DB_PASSWORD, DB_DATABASE, DB_USER);
-
 medicalBot.launch();

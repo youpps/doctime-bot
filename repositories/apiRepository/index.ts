@@ -1,10 +1,10 @@
 import mysql2 from "mysql2/promise";
 
 class APIRepository {
-  constructor(private apiBaseUrl: string) {}
+  constructor(private baseUrl: string) {}
 
   async getRequest<T>(endpoint: string, params?: Record<string, string>): Promise<T> {
-    const url = new URL(endpoint, this.apiBaseUrl);
+    const url = new URL(endpoint, this.baseUrl);
 
     if (params) {
       Object.keys(params).forEach((key) => {
@@ -25,7 +25,7 @@ class APIRepository {
 
     return response.json();
   }
-
+  
   async getSimilarDiagnoses(diagnosis: string): Promise<string[]> {
     try {
       const response = await this.getRequest<any>("/diagnoses/similar", {
