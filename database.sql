@@ -1,4 +1,4 @@
-CREATE TABLE doctimeai
+CREATE DATABASE doctimeai
 
 CREATE TABLE clients (
     telegramId BIGINT NOT NULL PRIMARY KEY,
