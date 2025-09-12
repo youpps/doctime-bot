@@ -369,7 +369,7 @@ class MedicalBot {
 
   private async showDiagnosisOptions(ctx: BotContext, diagnoses: string[]): Promise<void> {
     const correctDiagnoses = diagnoses.filter(
-      (diagnosis) => diagnosis.lastIndexOf(diagnosis) !== diagnoses.indexOf(diagnosis)
+      (diagnosis) => diagnosis.lastIndexOf(diagnosis) === diagnoses.indexOf(diagnosis)
     );
 
     const buttons = await Promise.all(
